@@ -45,5 +45,9 @@ grade each individual move separately starting from the start node(s) and buildi
 1. Summarize your findings in two sentences 
 2. If you would solve the task again, what would you do differently? 
 
+Future idea:
+User can chat with AI and select certain hold styles and move sets / describe to the AI what they want the climb to look like.
+The AI will generate a climb using those certain types of hold and move sets with the desired grade that the user wants.
+
 6. Contributions / Roles 
 1. For every team member, indicate the role played and the contributions made.
