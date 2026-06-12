@@ -16,3 +16,6 @@ atrbyg24/kilter-board: Using machine learning to predict the difficulty of climb
 Moonboard routes and analysis
 gestalt-howard/moonGen: Classifying rock climbing difficulties for MoonBoard routes 
 https://github.com/jrchang612/MoonBoardRNN
+
+LLM coding exercices
+https://github.com/laura-dietz/ir-genai-coding-exercises
