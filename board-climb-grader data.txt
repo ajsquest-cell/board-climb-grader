@@ -1,4 +1,8 @@
-﻿Data Scrapers / API Interraceability
+﻿Alex: Kilter analysis
+Ben: Moonboard analysis
+Both: API
+
+Data Scrapers / API Interraceability
 lemeryfertitta/BoardLib: Utilities for interacting with climbing board APIs 
 https://github.com/ConnorDKeehan/OpenMoonBoard/tree/main
 https://climbdex.fly.dev/
