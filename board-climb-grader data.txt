@@ -1,0 +1,14 @@
+﻿Data Scrapers / API Interraceability
+lemeryfertitta/BoardLib: Utilities for interacting with climbing board APIs 
+https://github.com/ConnorDKeehan/OpenMoonBoard/tree/main
+https://climbdex.fly.dev/
+lemeryfertitta/Climbdex: Search engine for training board climbs 
+
+Kitler Board data set analysis
+https://gitlab.com/psark/tension-board-2-analysis
+https://github.com/psark007/Kilter-Board-Analysis
+atrbyg24/kilter-board: Using machine learning to predict the difficulty of climbs found on the kilter board. 
+
+Moonboard routes and analysis
+gestalt-howard/moonGen: Classifying rock climbing difficulties for MoonBoard routes 
+https://github.com/jrchang612/MoonBoardRNN

@@ -1,0 +1,46 @@
+﻿1. Introduction 
+1. a task definition 
+2. the motivation for why you explored the methods you chose to explore 
+
+
+The implementation of large language
+
+
+2. Related Work 
+1. for each of the methods/algorithms you use: summarize the algorithm and give a reference 
+2. for all other work that you refer to, summarize in one one paragraph 
+
+
+3. Approach (what are the methods that you implemented 
+1. For every method that you implemented: 
+1. Provide a unique name (that is also used in the Evaluation section) 
+2. Describe how the method works in a way that someone else could reproduce it. 
+3. Provide pseudo code and figures where appropriate 
+2. How are you combining different methods to address your task? 
+
+
+4. Evaluation 
+1. describe your evaluation paradigm, that is 
+1. data set 
+2. corpus 
+3. queries 
+4. ground truth 
+2. Which methods are you comparing? 
+3. Which evaluation measures will are you using? 
+4. What are the results? 
+5. Give plots and tables --- Label your axes! 
+6. Provide at least one paragraph per plot/table, that walks the reader through the plot/table and interprets the results. 
+7. Which methods worked better/worse? 
+8. Are errors of different methods complementary? 
+9. what are typical errors? 
+10.Discuss statistical significance of the results (standard error bar test, pair-t-test) 
+11.If applicable, include a screenshot of your prototype. 
+
+
+5. Conclusion / Future Work 
+1. Summarize your findings in two sentences 
+2. If you would solve the task again, what would you do differently? 
+
+
+6. Contributions / Roles 
+1. For every team member, indicate the role played and the contributions made.
