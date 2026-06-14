@@ -1,0 +1,28 @@
+MoonboardRNN notes
+This repository has 3 key models for processing and grading climbs.
+1. BetaMove converts a moonboard problem into a sequence of moves
+2. DeepRouteSet is a model trained off of the data from BetaMove that learns the patterns between adjacent moves from Moonboard problems and generates new problems, this process is similar to music generation
+3. GradeNet is a model also trained off the data from BetaMove that is able to predict the grade of a moonboard problem
+
+They use raw data scrapped from the moonboard website and code from https://github.com/gestalt-howard/moonGen 
+There are 4 jupyter notebooks in a preprocessing folder which I believe is used for BetaMove, 
+1. The first notebook seperates moonboard problems based on if the problem is benchmarked and if there is a user grading
+2. The second computes the success score of each move based on the distance between holds and the difficulty scale of each hold, then finds the best route using a beam search algorithm
+3. The third divides the dataset into training/dev/test sets 
+4. The fourth is unclear, I believe it does different things depending on if the preprocessing is for DeepRouteSet or GradeNet
+
+There a website here: https://jrchang612.github.io/MoonBoardRNN/website/. that shows the 65 moonboard problems that DeepRouteSet has generated
+
+MoonGen
+MoonGen is the repository that MoonboardRNN borrowed code from to complete their project, this is a machine learning project to classify the difficulty of climbing routes on the moonboard (and its in Python :) )
+The main code seems to just get the scrapped data and format into coordinates with features and labels that presumably match with some difficulty modifier on each 
+There's definitly stuff we can use here in MoonGen, they use pickles to get model predictions on data-sets
+Ok here's how I understand it, They scrap a bunch of data and move it into a standardized format that reoresents the different holds and positions on the board. They get 4000 of each difficulty V4-V11
+Then they extract the adjacency matrices which seems to be the relationship between holds next to eachother then create a normalized diagonal adjacency representation so they can look at the geometric and structural properties of each route
+Then they train and compare 5 different models
+1. Logistic Regression - baseline
+2. Support vector machine (SVM) - A non-linear classification
+3. Random Forest - Ensemble method
+4. Gradient Boosting - Iterative Ensemble
+5. Multi-Layer Perceptron (MLP) - The Neural Network
+Then the model predicts a probability distribution across the 11 difficulty grades with the highest probability indicating the predicted grade
