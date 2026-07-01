@@ -6,7 +6,7 @@ from pathlib import Path
 import sklearn
 from sklearn.linear_model import LinearRegression
 
-from extract_holes import extract_holes
+from scripts.fetch_coords import extract_holes
 
 
 # Alex King and Ben Hawkins
