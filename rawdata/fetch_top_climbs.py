@@ -5,10 +5,11 @@ from pathlib import Path
 DB_PATH = Path(__file__).resolve().parent / "data" / "tb2.db"
 TABLE_NAME = "climb_cache_fields"
 
-SELECT_SQL = f"SELECT * FROM {TABLE_NAME} ORDER BY ascensionist_count DESC LIMIT ?"
-
-
+# Fetch the top X climbs based on number of ascensents
 def fetch_top_climbs(limit):
+
+    SELECT_SQL = f"SELECT * FROM {TABLE_NAME} ORDER BY ascensionist_count DESC LIMIT ?"
+
     if not DB_PATH.exists():
         raise FileNotFoundError(f"Database file not found: {DB_PATH}")
 
@@ -19,18 +20,17 @@ def fetch_top_climbs(limit):
         return cursor.fetchall()
 
 
+# Fetch climb stats by climb_uuid
 def get_climb_stats(climb_uuid):
     if not DB_PATH.exists():
         raise FileNotFoundError(f"Database file not found: {DB_PATH}")
 
+    SELECT_STATS_SQL = f"""SELECT ascensionist_count, display_difficulty, quality_average 
+        FROM {TABLE_NAME} WHERE climb_uuid = ?"""
+
     with sqlite3.connect(DB_PATH) as conn:
         cursor = conn.cursor()
-        cursor.execute(
-            f"""SELECT ascensionist_count, display_difficulty, quality_average 
-               FROM {TABLE_NAME} 
-               WHERE climb_uuid = ?""",
-            (climb_uuid,)
-        )
+        cursor.execute(SELECT_STATS_SQL, (climb_uuid,))
         result = cursor.fetchone()
         
         if result:
@@ -43,6 +43,7 @@ def get_climb_stats(climb_uuid):
             return None
 
 
+# Testing
 if __name__ == "__main__":
     if len(sys.argv) == 1:
         count = 100

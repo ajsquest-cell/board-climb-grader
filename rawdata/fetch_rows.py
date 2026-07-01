@@ -5,12 +5,12 @@ from pathlib import Path
 DB_PATH = Path(__file__).resolve().parent / "data" / "tb2.db"
 TABLE_NAME = "climbs"
 
-SELECT_SQL = f"SELECT * FROM {TABLE_NAME} LIMIT ?"
-
-
+# Fetch the first X rows from the "climbs" table
 def fetch_first_rows(limit):
     if not DB_PATH.exists():
         raise FileNotFoundError(f"Database file not found: {DB_PATH}")
+    
+    SELECT_SQL = f"SELECT * FROM {TABLE_NAME} LIMIT ?"
 
     with sqlite3.connect(DB_PATH) as conn:
         conn.row_factory = sqlite3.Row
@@ -18,7 +18,20 @@ def fetch_first_rows(limit):
         cursor.execute(SELECT_SQL, (limit,))
         return cursor.fetchall()
 
+# Fetch a specific row by climb_uuid
+def fetch_row_by_climb_uuid(climb_uuid):
+    if not DB_PATH.exists():
+        raise FileNotFoundError(f"Database file not found: {DB_PATH}")
 
+    SELECT_BY_UUID_SQL = f"SELECT * FROM {TABLE_NAME} WHERE climb_uuid = ?"
+
+    with sqlite3.connect(DB_PATH) as conn:
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+        cursor.execute(SELECT_BY_UUID_SQL, (climb_uuid,))
+        return cursor.fetchone()
+
+# Testing
 if __name__ == "__main__":
     if len(sys.argv) == 1:
         count = 10
