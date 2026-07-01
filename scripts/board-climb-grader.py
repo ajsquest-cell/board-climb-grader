@@ -1,6 +1,7 @@
 import re
 import sqlite3
 import pandas as pd
+from pathlib import Path
 
 import sklearn
 from sklearn.linear_model import LinearRegression
@@ -11,7 +12,7 @@ from extract_holes import extract_holes
 # Alex King and Ben Hawkins
 # board-climb-grader.py
 
-PLACEMENTS_PATH = "C:\\Users\\Alexa\\OneDrive\\Documents\\climbing-data\\data\\tb2.db"
+PLACEMENTS_PATH = Path(__file__).resolve().parent / "data" / "tb2.db"
 
 ## Board Constants
 x_min = -24
