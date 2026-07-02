@@ -21,7 +21,7 @@ def fetch_top_climbs(limit):
 
 
 # Fetch climb stats by climb_uuid
-def get_climb_stats(climb_uuid):
+def fetch_climb_stats(climb_uuid):
     if not DB_PATH.exists():
         raise FileNotFoundError(f"Database file not found: {DB_PATH}")
 
@@ -77,7 +77,7 @@ if __name__ == "__main__":
     if rows:
         first_climb_uuid = rows[0]['climb_uuid']
         print(f"\n=== Example: Fetching stats for climb {first_climb_uuid} ===")
-        stats = get_climb_stats(first_climb_uuid)
+        stats = fetch_climb_stats(first_climb_uuid)
         if stats:
             print(f"Ascensionist Count: {stats['ascensionist_count']}")
             print(f"Display Difficulty: {stats['display_difficulty']}")

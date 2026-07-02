@@ -3,10 +3,17 @@ import sqlite3
 import pandas as pd
 from pathlib import Path
 
-import sklearn
-from sklearn.linear_model import LinearRegression
+import numpy as np
+import pandas as pd
+from sklearn.model_selection import train_test_split
+from sklearn.linear_model import LogisticRegression
+from sklearn.metrics import accuracy_score, confusion_matrix
 
-from scripts.fetch_coords import extract_holes
+from fetch_coords import extract_holes
+from fetch_climb_rows import fetch_first_rows
+from fetch_difficulty_grades import fetch_difficulty_grades
+from fetch_climb_stats import fetch_climb_stats
+from fetch_angle import fetch_angle
 
 
 # Alex King and Ben Hawkins
@@ -78,7 +85,7 @@ def extract_features_from_frame(angle, frame):
         })
     
     # testing
-    print_hold_data(hold_data)
+    # print_hold_data(hold_data)
 
     if not hold_data:
         raise ValueError("No valid holds found in the frame.")
@@ -142,12 +149,55 @@ def extract_features_from_frame(angle, frame):
 
 # Testing
 def main():
-    angle = 30  # Example angle
-    frame = "p1r3p14r2p67r1p73r1p80r2p279r4"  # Example frame string
-    features = extract_features_from_frame(angle, frame)
-    # Print the extracted features
-    for feature, value in features.items():
-        print(f"{feature}: {value}")
+    difficulty_grades = fetch_difficulty_grades()
+
+    rows = fetch_first_rows(1000)
+
+    climb_data = []
+
+    for row in rows:
+        record = {
+            'climb_id': row['uuid'],
+            'angle': fetch_angle(row['uuid']),
+            'frames': row['frames'],
+            'edge_left': row['edge_left'],
+            'edge_right': row['edge_right'],
+            'edge_bottom': row['edge_bottom'],
+            'edge_top': row['edge_top'],
+        }
+        stats = fetch_climb_stats(record['climb_id'])
+        record['climb_grade'] = int(stats['display_difficulty']) if stats and stats.get('display_difficulty') is not None else None
+        features = extract_features_from_frame(record['angle'], record['frames'])
+        record.update(features)
+        climb_data.append(record)
+        # print(f"Climb ID: {record['climb_id']}, Grade: {record['climb_grade']}, Features: {features}")
+
+    df = pd.DataFrame(climb_data)
+
+    # Remove rows with missing climb_grade
+    df = df[df["climb_grade"].notna()]
+    
+    # Fill NaN values in features with 0
+    feature_columns = ["angle", "num_holds","height_gained_from_start_to_finish", "hold_density", "mean_hand_reach", "max_hand_reach", "std_hand_reach"]
+    df[feature_columns] = df[feature_columns].fillna(0)
+
+    X = df[feature_columns]
+    y = df["climb_grade"]
+
+    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+
+    model = LogisticRegression(max_iter=1000)
+    model.fit(X_train, y_train)
+
+    y_pred = model.predict(X_test)
+    accuracy = accuracy_score(y_test, y_pred)
+
+    conf_matrix = confusion_matrix(y_test, y_pred)
+
+    print(f'Accuracy: {accuracy}')
+    print(f'Confusion Matrix:\n{conf_matrix}')
+
+
 
 if __name__ == "__main__":
     main()
