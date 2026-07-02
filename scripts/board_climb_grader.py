@@ -9,12 +9,7 @@ from sklearn.model_selection import train_test_split
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import accuracy_score, confusion_matrix
 
-from fetch_coords import extract_holes
-from fetch_climb_rows import fetch_first_rows
-from fetch_difficulty_grades import fetch_difficulty_grades
-from fetch_climb_stats import fetch_climb_stats
-from fetch_angle import fetch_angle
-
+import access_database as adb
 
 # Alex King and Ben Hawkins
 # board-climb-grader.py
@@ -42,7 +37,7 @@ HOLD_MAPPING = {
 }
 
 # Load hold placements
-placement_coords = extract_holes()
+placement_coords = adb.extract_holes()
 
 # Pawel defulted middle, unknown for now to catch unexpected hold ids
 def get_hold_type(hold_id):
@@ -99,7 +94,7 @@ def extract_features_from_frame(angle, frame):
 
     # Base features
     features['angle'] = angle
-    # features["angle_squared"] = float(angle) ** 2
+    features["angle_squared"] = float(angle) ** 2 if angle is not None else None
     features['num_holds'] = len(holds)
     features['num_hand_holds'] = len([hold for hold in hold_data if hold['is_hand_hold']])
     features['num_foot_holds'] = len([hold for hold in hold_data if hold['is_foot_hold']])
@@ -109,19 +104,20 @@ def extract_features_from_frame(angle, frame):
 
     # Spatial features
     features['mean_y'] = sum(hold['y'] for hold in hold_data) / len(hold_data)
-    features['std_y'] = (sum((hold['y'] - center_y) ** 2 for hold in hold_data) / len(hold_data)) ** 0.5
+    features['std_y'] = (sum((hold['y'] - features['mean_y']) ** 2 for hold in hold_data) / len(hold_data)) ** 0.5    
     features['min_y'] = min(hold['y'] for hold in hold_data)
     features['max_y'] = max(hold['y'] for hold in hold_data)
+    features['min_x'] = min(hold['x'] for hold in hold_data)
+    features['max_x'] = max(hold['x'] for hold in hold_data)
     features['range_y'] = features['max_y'] - features['min_y']
-    features['range_x'] = max(hold['x'] for hold in hold_data) - min(hold['x'] for hold in hold_data)
-    features["height_gained"] = features["max_y"] - features["min_y"]
+    features['range_x'] = features['max_x'] - features['min_x']
     
     features['start_height'] = min(hold['y'] for hold in hold_data if hold['hold_type'] == 'start') if features['start_holds'] > 0 else None
     features['finish_height'] = max(hold['y'] for hold in hold_data if hold['hold_type'] == 'finish') if features['finish_holds'] > 0 else None
     features['height_gained_from_start_to_finish'] = (features['finish_height'] - features['start_height']) if features['start_height'] is not None and features['finish_height'] is not None else None
 
     # Density features
-    features['box_area'] = features['range_x'] * features['range_y'] if features['range_x'] and features['range_y'] else 1
+    features['box_area'] = features['range_x'] * features['range_y'] if features['range_x'] is not None and features['range_y'] is not None and features['range_x'] > 0 and features['range_y'] > 0 else 1
     features['hold_density'] = features['num_holds'] / features['box_area'] if features['box_area'] else 0
     features['hand_hold_density'] = features['num_hand_holds'] / features['box_area'] if features['box_area'] else 0
     features['foot_hold_density'] = features['num_foot_holds'] / features['box_area'] if features['box_area'] else 0
@@ -129,7 +125,9 @@ def extract_features_from_frame(angle, frame):
 
     # Hand reach features
     if features['num_hand_holds'] >= 2:
-        features['mean_hand_reach'] = sum(abs(hold_data[i]['x'] - hold_data[i-1]['x']) for i in range(1, len(hold_data)) if hold_data[i]['is_hand_hold'] and hold_data[i-1]['is_hand_hold']) / (features['num_hand_holds'] - 1)
+        hand_pairs = [i for i in range(1, len(hold_data)) if hold_data[i]['is_hand_hold'] and hold_data[i-1]['is_hand_hold']]
+        if hand_pairs:
+            features['mean_hand_reach'] = sum(abs(hold_data[i]['x'] - hold_data[i-1]['x']) for i in hand_pairs) / len(hand_pairs)
         features['max_hand_reach'] = float(max(abs(hold_data[i]['x'] - hold_data[i-1]['x']) for i in range(1, len(hold_data)) if hold_data[i]['is_hand_hold'] and hold_data[i-1]['is_hand_hold']))
         features['std_hand_reach'] = (sum((abs(hold_data[i]['x'] - hold_data[i-1]['x']) - features['mean_hand_reach']) ** 2 for i in range(1, len(hold_data)) if hold_data[i]['is_hand_hold'] and hold_data[i-1]['is_hand_hold']) / (features['num_hand_holds'] - 1)) ** 0.5
         # features['hand_span_y'] = max(hold['y'] for hold in hold_data if hold['is_hand_hold']) - min(hold['y'] for hold in hold_data if hold['is_hand_hold'])
@@ -149,27 +147,28 @@ def extract_features_from_frame(angle, frame):
 
 # Testing
 def main():
-    difficulty_grades = fetch_difficulty_grades()
+    difficulty_grades = adb.fetch_difficulty_grades()
 
-    rows = fetch_first_rows(1000)
+    rows = adb.fetch_first_rows(1000)
 
     climb_data = []
 
     for row in rows:
         record = {
             'climb_id': row['uuid'],
-            'angle': fetch_angle(row['uuid']),
+            'angle': adb.fetch_angle(row['uuid']),
             'frames': row['frames'],
             'edge_left': row['edge_left'],
             'edge_right': row['edge_right'],
             'edge_bottom': row['edge_bottom'],
             'edge_top': row['edge_top'],
         }
-        stats = fetch_climb_stats(record['climb_id'])
+        stats = adb.fetch_climb_stats(record['climb_id'])
         record['climb_grade'] = int(stats['display_difficulty']) if stats and stats.get('display_difficulty') is not None else None
         features = extract_features_from_frame(record['angle'], record['frames'])
         record.update(features)
         climb_data.append(record)
+        # Testing
         # print(f"Climb ID: {record['climb_id']}, Grade: {record['climb_grade']}, Features: {features}")
 
     df = pd.DataFrame(climb_data)
@@ -178,7 +177,7 @@ def main():
     df = df[df["climb_grade"].notna()]
     
     # Fill NaN values in features with 0
-    feature_columns = ["angle", "num_holds","height_gained_from_start_to_finish", "hold_density", "mean_hand_reach", "max_hand_reach", "std_hand_reach"]
+    feature_columns = ["angle", "angle_squared", "num_holds", "height_gained_from_start_to_finish", "hold_density", "mean_hand_reach", "max_hand_reach", "std_hand_reach"]
     df[feature_columns] = df[feature_columns].fillna(0)
 
     X = df[feature_columns]
@@ -191,12 +190,17 @@ def main():
 
     y_pred = model.predict(X_test)
     accuracy = accuracy_score(y_test, y_pred)
+    
+    # Calculate within buckets
+    within_1 = np.mean(np.abs(y_test - y_pred) <= 1)
+    within_2 = np.mean(np.abs(y_test - y_pred) <= 2)
 
     conf_matrix = confusion_matrix(y_test, y_pred)
 
-    print(f'Accuracy: {accuracy}')
+    print(f'Exact Accuracy: {accuracy:.4f}')
+    print(f'Within 1 Grade Accuracy: {within_1:.4f}')
+    print(f'Within 2 Grades Accuracy: {within_2:.4f}')
     print(f'Confusion Matrix:\n{conf_matrix}')
-
 
 
 if __name__ == "__main__":
