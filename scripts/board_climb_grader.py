@@ -2,6 +2,7 @@ import re
 import sqlite3
 import pandas as pd
 from pathlib import Path
+import random
 
 import numpy as np
 import pandas as pd
@@ -39,7 +40,7 @@ HOLD_MAPPING = {
 # Load hold placements
 placement_coords = adb.extract_holes()
 
-# Pawel defulted middle, unknown for now to catch unexpected hold ids
+# defulted middle
 def get_hold_type(hold_id):
     return HOLD_MAPPING.get(hold_id, 'middle')
 
@@ -59,34 +60,33 @@ def print_hold_data(hold_data):
 # Extract features from a given frame and angle
 def extract_features_from_frame(angle, frame):
     holds = parse_frame(frame)
-    
+
     if holds is None:
         raise ValueError("Invalid frame format.")
-    
+
     hold_data = []
     # p is placement id, h is hold id
     for p_id, h_id in holds:
-        coridnate = placement_coords.get(p_id, (None, None))
+        coordinate = placement_coords.get(p_id, (None, None))
+        if coordinate[0] is None or coordinate[1] is None:
+            continue
+
         hold_type = get_hold_type(h_id)
         is_hand_hold = h_id in HAND_HOLD_IDS
         is_foot_hold = h_id in FOOT_HOLD_IDS
         hold_data.append({
             'hold_id': p_id,
-            'x': coridnate[0],
-            'y': coridnate[1],
+            'x': coordinate[0],
+            'y': coordinate[1],
             'hold_type': hold_type,
             'is_hand_hold': is_hand_hold,
             'is_foot_hold': is_foot_hold
         })
-    
+
     # testing
     # print_hold_data(hold_data)
 
-    if not hold_data:
-        raise ValueError("No valid holds found in the frame.")
-
-    center_x = (x_min + x_max) / 2
-    center_y = (y_min + y_max) / 2
+    df = pd.DataFrame(hold_data)
 
     features = {}
 
@@ -103,33 +103,51 @@ def extract_features_from_frame(angle, frame):
     features['middle_holds'] = len([hold for hold in hold_data if hold['hold_type'] == 'middle'])
 
     # Spatial features
-    features['mean_y'] = sum(hold['y'] for hold in hold_data) / len(hold_data)
-    features['std_y'] = (sum((hold['y'] - features['mean_y']) ** 2 for hold in hold_data) / len(hold_data)) ** 0.5    
-    features['min_y'] = min(hold['y'] for hold in hold_data)
-    features['max_y'] = max(hold['y'] for hold in hold_data)
-    features['min_x'] = min(hold['x'] for hold in hold_data)
-    features['max_x'] = max(hold['x'] for hold in hold_data)
-    features['range_y'] = features['max_y'] - features['min_y']
-    features['range_x'] = features['max_x'] - features['min_x']
-    
-    features['start_height'] = min(hold['y'] for hold in hold_data if hold['hold_type'] == 'start') if features['start_holds'] > 0 else None
-    features['finish_height'] = max(hold['y'] for hold in hold_data if hold['hold_type'] == 'finish') if features['finish_holds'] > 0 else None
-    features['height_gained_from_start_to_finish'] = (features['finish_height'] - features['start_height']) if features['start_height'] is not None and features['finish_height'] is not None else None
+    if hold_data:
+        features['mean_y'] = sum(hold['y'] for hold in hold_data) / len(hold_data)
+        features['std_y'] = (sum((hold['y'] - features['mean_y']) ** 2 for hold in hold_data) / len(hold_data)) ** 0.5
+        features['min_y'] = min(hold['y'] for hold in hold_data)
+        features['max_y'] = max(hold['y'] for hold in hold_data)
+        features['min_x'] = min(hold['x'] for hold in hold_data)
+        features['max_x'] = max(hold['x'] for hold in hold_data)
+        features['range_y'] = features['max_y'] - features['min_y']
+        features['range_x'] = features['max_x'] - features['min_x']
+
+        features['start_height'] = min(hold['y'] for hold in hold_data if hold['hold_type'] == 'start') if features['start_holds'] > 0 else None
+        features['finish_height'] = max(hold['y'] for hold in hold_data if hold['hold_type'] == 'finish') if features['finish_holds'] > 0 else None
+        features['height_gained_from_start_to_finish'] = (features['finish_height'] - features['start_height']) if features['start_height'] is not None and features['finish_height'] is not None else None
+    else:
+        features['mean_y'] = 0.0
+        features['std_y'] = 0.0
+        features['min_y'] = 0.0
+        features['max_y'] = 0.0
+        features['min_x'] = 0.0
+        features['max_x'] = 0.0
+        features['range_y'] = 0.0
+        features['range_x'] = 0.0
+        features['start_height'] = None
+        features['finish_height'] = None
+        features['height_gained_from_start_to_finish'] = None
 
     # Density features
     features['box_area'] = features['range_x'] * features['range_y'] if features['range_x'] is not None and features['range_y'] is not None and features['range_x'] > 0 and features['range_y'] > 0 else 1
     features['hold_density'] = features['num_holds'] / features['box_area'] if features['box_area'] else 0
+    features['hold_density_squared'] = (features['num_holds'] / features['box_area']) ** 2 if features['box_area'] else 0
     features['hand_hold_density'] = features['num_hand_holds'] / features['box_area'] if features['box_area'] else 0
     features['foot_hold_density'] = features['num_foot_holds'] / features['box_area'] if features['box_area'] else 0
     # features['hold_per_unit_height'] = features['num_holds'] / features['height_gained'] if features['height_gained'] else 0
 
     # Hand reach features
-    if features['num_hand_holds'] >= 2:
+    if features['num_hand_holds'] >= 2 and hold_data:
         hand_pairs = [i for i in range(1, len(hold_data)) if hold_data[i]['is_hand_hold'] and hold_data[i-1]['is_hand_hold']]
         if hand_pairs:
             features['mean_hand_reach'] = sum(abs(hold_data[i]['x'] - hold_data[i-1]['x']) for i in hand_pairs) / len(hand_pairs)
-        features['max_hand_reach'] = float(max(abs(hold_data[i]['x'] - hold_data[i-1]['x']) for i in range(1, len(hold_data)) if hold_data[i]['is_hand_hold'] and hold_data[i-1]['is_hand_hold']))
-        features['std_hand_reach'] = (sum((abs(hold_data[i]['x'] - hold_data[i-1]['x']) - features['mean_hand_reach']) ** 2 for i in range(1, len(hold_data)) if hold_data[i]['is_hand_hold'] and hold_data[i-1]['is_hand_hold']) / (features['num_hand_holds'] - 1)) ** 0.5
+            features['max_hand_reach'] = float(max(abs(hold_data[i]['x'] - hold_data[i-1]['x']) for i in range(1, len(hold_data)) if hold_data[i]['is_hand_hold'] and hold_data[i-1]['is_hand_hold']))
+            features['std_hand_reach'] = (sum((abs(hold_data[i]['x'] - hold_data[i-1]['x']) - features['mean_hand_reach']) ** 2 for i in range(1, len(hold_data)) if hold_data[i]['is_hand_hold'] and hold_data[i-1]['is_hand_hold']) / (features['num_hand_holds'] - 1)) ** 0.5
+        else:
+            features['mean_hand_reach'] = 0.0
+            features['max_hand_reach'] = 0.0
+            features['std_hand_reach'] = 0.0
         # features['hand_span_y'] = max(hold['y'] for hold in hold_data if hold['is_hand_hold']) - min(hold['y'] for hold in hold_data if hold['is_hand_hold'])
         # features['hand_span_x'] = max(hold['x'] for hold in hold_data if hold['is_hand_hold']) - min(hold['x'] for hold in hold_data if hold['is_hand_hold'])
     else:
@@ -147,9 +165,13 @@ def extract_features_from_frame(angle, frame):
 
 # Testing
 def main():
-    difficulty_grades = adb.fetch_difficulty_grades()
+    difficulty_grades = adb.extract_difficulty_grades()
 
-    rows = adb.fetch_first_rows(1000)
+    count = 1000
+    offset = random.randint(0, adb.get_table_size("climbs") - count)
+
+    # rows = adb.fetch_random_rows(count)
+    rows = adb.fetch_rows_from(count, offset)
 
     climb_data = []
 

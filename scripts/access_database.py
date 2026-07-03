@@ -1,5 +1,5 @@
+import random
 import sqlite3
-import sys
 from pathlib import Path
 
 DB_PATH = Path(__file__).resolve().parent / "data" / "tb2.db"
@@ -9,6 +9,98 @@ BETA_LINKS_TABLE = "beta_links"
 CLIMB_CACHE_FIELDS_TABLE = "climb_cache_fields"
 CLIMBS_TABLE = "climbs"
 DIFFICULTY_GRADES_TABLE = "difficulty_grades"
+
+# In-memory cache keyed by climb_uuid
+ROW_CACHE = {}
+
+# In-memory cache for table sizes
+TABLE_SIZE_CACHE = {}
+
+
+# Get the size of a table in the database, cache to prevent repeated queries
+def get_table_size(table_name):
+    if table_name in TABLE_SIZE_CACHE:
+        return TABLE_SIZE_CACHE[table_name]
+
+    if not DB_PATH.exists():
+        raise FileNotFoundError(f"Database file not found: {DB_PATH}")
+
+    with sqlite3.connect(DB_PATH) as conn:
+        cursor = conn.cursor()
+        cursor.execute(f"SELECT COUNT(*) FROM {table_name}")
+        size = cursor.fetchone()[0]
+
+    TABLE_SIZE_CACHE[table_name] = size
+    return size
+
+
+# Fetch X rows from the "climbs" table starting at offset
+def fetch_rows_from(limit, offset=0):
+    if not DB_PATH.exists():
+        raise FileNotFoundError(f"Database file not found: {DB_PATH}")
+
+    # Check within bounds of the table size
+    total_count = get_table_size(CLIMBS_TABLE)
+    if offset >= total_count or offset < 0:
+        return []
+
+    SELECT_SQL = f"SELECT * FROM {CLIMBS_TABLE} LIMIT ? OFFSET ?"
+
+    with sqlite3.connect(DB_PATH) as conn:
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+        cursor.execute(SELECT_SQL, (limit, offset))
+        return cursor.fetchall()
+
+
+# Fetch a sample of rows from several random locations in the table.
+def fetch_random_rows(limit):
+    if limit <= 0:
+        return []
+
+    if not DB_PATH.exists():
+        raise FileNotFoundError(f"Database file not found: {DB_PATH}")
+
+    with sqlite3.connect(DB_PATH) as conn:
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+
+        # Use the cached table size so random offsets stay inside the table bounds
+        total_count = get_table_size(CLIMBS_TABLE)
+        if total_count == 0:
+            return []
+
+        # Return whole table if at table limit
+        if limit >= total_count:
+            cursor.execute(f"SELECT * FROM {CLIMBS_TABLE}")
+            rows = cursor.fetchall()
+        else:
+            # Use a few random offsets to pull chunks from different parts of the table
+            chunk_size = max(1, limit // 4)
+            num_chunks = max(1, min(4, limit))
+            offsets = [random.randrange(total_count - chunk_size + 1) for _ in range(num_chunks)]
+
+            rows = []
+            for offset in offsets:
+                cursor.execute(
+                    f"SELECT * FROM {CLIMBS_TABLE} LIMIT ? OFFSET ?",
+                    (chunk_size, offset),
+                )
+                rows.extend(cursor.fetchall())
+
+    # Cache row id for quick lookup and remove duplicates
+    unique_rows = []
+    for row in rows:
+        row_id = row["uuid"]
+        if row_id in ROW_CACHE:
+            continue
+        ROW_CACHE[row_id] = row
+        unique_rows.append(row)
+        if len(unique_rows) >= limit:
+            break
+
+    return unique_rows
+
 
 # Fetch climb stats by climb_uuid
 def fetch_angle(climb_uuid):
@@ -27,22 +119,13 @@ def fetch_angle(climb_uuid):
         else:
             return None
 
-# Fetch the first X rows from the "climbs" table
-def fetch_first_rows(limit):
-    if not DB_PATH.exists():
-        raise FileNotFoundError(f"Database file not found: {DB_PATH}")
-    
-    SELECT_SQL = f"SELECT * FROM {CLIMBS_TABLE} LIMIT ?"
-
-    with sqlite3.connect(DB_PATH) as conn:
-        conn.row_factory = sqlite3.Row
-        cursor = conn.cursor()
-        cursor.execute(SELECT_SQL, (limit,))
-        return cursor.fetchall()
-
 
 # Fetch a specific row by climb_uuid
-def fetch_row_by_climb_uuid(climb_uuid):
+def fetch_row_by_id(climb_uuid):
+    # Check the cache
+    if climb_uuid in ROW_CACHE:
+        return ROW_CACHE[climb_uuid]
+
     if not DB_PATH.exists():
         raise FileNotFoundError(f"Database file not found: {DB_PATH}")
 
@@ -52,20 +135,33 @@ def fetch_row_by_climb_uuid(climb_uuid):
         conn.row_factory = sqlite3.Row
         cursor = conn.cursor()
         cursor.execute(SELECT_BY_UUID_SQL, (climb_uuid,))
-        return cursor.fetchone()
+        row = cursor.fetchone()
 
-# Fetch the top X climbs based on number of ascensents
-def fetch_top_climbs(limit):
+    # Add to cache and return
+    if row is not None:
+        ROW_CACHE[climb_uuid] = row
 
-    SELECT_SQL = f"SELECT * FROM {CLIMB_CACHE_FIELDS_TABLE} ORDER BY ascensionist_count DESC LIMIT ?"
+    return row
+
+
+# Fetch the most popular X climbs based on number of total completions
+def fetch_popular_climbs(limit):
+    if limit <= 0:
+        return []
 
     if not DB_PATH.exists():
         raise FileNotFoundError(f"Database file not found: {DB_PATH}")
 
+    total_count = get_table_size(CLIMB_CACHE_FIELDS_TABLE)
+    if total_count == 0:
+        return []
+
+    SELECT_SQL = f"SELECT * FROM {CLIMB_CACHE_FIELDS_TABLE} ORDER BY ascensionist_count DESC LIMIT ?"
+
     with sqlite3.connect(DB_PATH) as conn:
         conn.row_factory = sqlite3.Row
         cursor = conn.cursor()
-        cursor.execute(SELECT_SQL, (limit,))
+        cursor.execute(SELECT_SQL, (min(limit, total_count),))
         return cursor.fetchall()
 
 
@@ -83,6 +179,7 @@ def fetch_climb_stats(climb_uuid):
         result = cursor.fetchone()
         
         if result:
+            # data in a dictionary
             return {
                 'ascensionist_count': result[0],
                 'display_difficulty': result[1],
@@ -91,6 +188,7 @@ def fetch_climb_stats(climb_uuid):
         else:
             return None
         
+
 # Outputs a dictionary mapping hole_id to (x, y) coords
 def extract_holes():
     if not DB_PATH.exists():
@@ -107,7 +205,9 @@ def extract_holes():
     
     return placements
 
-def fetch_difficulty_grades():
+
+# get the difficulty grades scale from the database
+def extract_difficulty_grades():
 
     SELECT_SQL = f"SELECT * FROM {DIFFICULTY_GRADES_TABLE}"
 
@@ -117,7 +217,7 @@ def fetch_difficulty_grades():
         cursor.execute(SELECT_SQL)
         records = cursor.fetchall()
 
-        # Return the fetched records
+        # Return the grade scale
         return records
 
     except sqlite3.Error as e:
@@ -125,5 +225,4 @@ def fetch_difficulty_grades():
     finally:
         if conn:
             conn.close()
-
     return None
