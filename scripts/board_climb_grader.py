@@ -167,11 +167,13 @@ def extract_features_from_frame(angle, frame):
 def main():
     difficulty_grades = adb.extract_difficulty_grades()
 
+    # number of climbs and offset
     count = 1000
     offset = random.randint(0, adb.get_table_size("climbs") - count)
 
-    # rows = adb.fetch_random_rows(count)
+    # Fetch rows from the database
     rows = adb.fetch_rows_from(count, offset)
+    # rows = adb.fetch_random_rows(count)
 
     climb_data = []
 
@@ -195,8 +197,11 @@ def main():
 
     df = pd.DataFrame(climb_data)
 
-    # Remove rows with missing climb_grade
+    # Remove rows with missing features
     df = df[df["climb_grade"].notna()]
+
+    # remove rows with outliers in features or difficulty
+    # add code here
     
     # Fill NaN values in features with 0
     feature_columns = ["angle", "angle_squared", "num_holds", "height_gained_from_start_to_finish", "hold_density", "mean_hand_reach", "max_hand_reach", "std_hand_reach"]
@@ -207,7 +212,7 @@ def main():
 
     X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
 
-    model = LogisticRegression(max_iter=1000)
+    model = LogisticRegression(max_iter=len(climb_data))
     model.fit(X_train, y_train)
 
     y_pred = model.predict(X_test)

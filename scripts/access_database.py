@@ -5,19 +5,16 @@ from pathlib import Path
 DB_PATH = Path(__file__).resolve().parent / "data" / "tb2.db"
 
 # Table names:
-BETA_LINKS_TABLE = "beta_links"
-CLIMB_CACHE_FIELDS_TABLE = "climb_cache_fields"
-CLIMBS_TABLE = "climbs"
-DIFFICULTY_GRADES_TABLE = "difficulty_grades"
-
-# In-memory cache keyed by climb_uuid
-ROW_CACHE = {}
+BETA_LINKS_TABLE = "beta_links" # Angle
+CLIMB_CACHE_FIELDS_TABLE = "climb_cache_fields" # Difficulty, quality, ascensionist count
+CLIMBS_TABLE = "climbs" # Frames and other climb data
+DIFFICULTY_GRADES_TABLE = "difficulty_grades" # Grading Scale
 
 # In-memory cache for table sizes
 TABLE_SIZE_CACHE = {}
 
 
-# Get the size of a table in the database, cache to prevent repeated queries
+# Get the size of a table in the database, cache to prevent repeated calculation
 def get_table_size(table_name):
     if table_name in TABLE_SIZE_CACHE:
         return TABLE_SIZE_CACHE[table_name]
@@ -39,7 +36,7 @@ def fetch_rows_from(limit, offset=0):
     if not DB_PATH.exists():
         raise FileNotFoundError(f"Database file not found: {DB_PATH}")
 
-    # Check within bounds of the table size
+    # Check if offset is within bounds of the table size
     total_count = get_table_size(CLIMBS_TABLE)
     if offset >= total_count or offset < 0:
         return []
@@ -65,7 +62,7 @@ def fetch_random_rows(limit):
         conn.row_factory = sqlite3.Row
         cursor = conn.cursor()
 
-        # Use the cached table size so random offsets stay inside the table bounds
+        # Check random offsets stay inside the table bounds
         total_count = get_table_size(CLIMBS_TABLE)
         if total_count == 0:
             return []
@@ -75,7 +72,7 @@ def fetch_random_rows(limit):
             cursor.execute(f"SELECT * FROM {CLIMBS_TABLE}")
             rows = cursor.fetchall()
         else:
-            # Use a few random offsets to pull chunks from different parts of the table
+            # Use random offsets to pull chunks from different parts of the table
             chunk_size = max(1, limit // 4)
             num_chunks = max(1, min(4, limit))
             offsets = [random.randrange(total_count - chunk_size + 1) for _ in range(num_chunks)]
@@ -88,44 +85,11 @@ def fetch_random_rows(limit):
                 )
                 rows.extend(cursor.fetchall())
 
-    # Cache row id for quick lookup and remove duplicates
-    unique_rows = []
-    for row in rows:
-        row_id = row["uuid"]
-        if row_id in ROW_CACHE:
-            continue
-        ROW_CACHE[row_id] = row
-        unique_rows.append(row)
-        if len(unique_rows) >= limit:
-            break
-
-    return unique_rows
-
-
-# Fetch climb stats by climb_uuid
-def fetch_angle(climb_uuid):
-    if not DB_PATH.exists():
-        raise FileNotFoundError(f"Database file not found: {DB_PATH}")
-    
-    SELECT_STATS_SQL = f"""SELECT angle FROM {BETA_LINKS_TABLE} WHERE climb_uuid = ?"""
-
-    with sqlite3.connect(DB_PATH) as conn:
-        cursor = conn.cursor()
-        cursor.execute(SELECT_STATS_SQL, (climb_uuid,))
-        result = cursor.fetchone()
-        
-        if result:
-            return result[0]
-        else:
-            return None
+    return rows[:limit]
 
 
 # Fetch a specific row by climb_uuid
 def fetch_row_by_id(climb_uuid):
-    # Check the cache
-    if climb_uuid in ROW_CACHE:
-        return ROW_CACHE[climb_uuid]
-
     if not DB_PATH.exists():
         raise FileNotFoundError(f"Database file not found: {DB_PATH}")
 
@@ -135,13 +99,7 @@ def fetch_row_by_id(climb_uuid):
         conn.row_factory = sqlite3.Row
         cursor = conn.cursor()
         cursor.execute(SELECT_BY_UUID_SQL, (climb_uuid,))
-        row = cursor.fetchone()
-
-    # Add to cache and return
-    if row is not None:
-        ROW_CACHE[climb_uuid] = row
-
-    return row
+        return cursor.fetchone()
 
 
 # Fetch the most popular X climbs based on number of total completions
@@ -187,7 +145,25 @@ def fetch_climb_stats(climb_uuid):
             }
         else:
             return None
+    
+
+# Fetch climb angle by climb_uuid
+def fetch_angle(climb_uuid):
+    if not DB_PATH.exists():
+        raise FileNotFoundError(f"Database file not found: {DB_PATH}")
+    
+    SELECT_STATS_SQL = f"""SELECT angle FROM {BETA_LINKS_TABLE} WHERE climb_uuid = ?"""
+
+    with sqlite3.connect(DB_PATH) as conn:
+        cursor = conn.cursor()
+        cursor.execute(SELECT_STATS_SQL, (climb_uuid,))
+        result = cursor.fetchone()
         
+        if result:
+            return result[0]
+        else:
+            return None
+
 
 # Outputs a dictionary mapping hole_id to (x, y) coords
 def extract_holes():
