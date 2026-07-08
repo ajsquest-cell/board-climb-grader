@@ -1,3 +1,7 @@
 *.db
 .db
+*.sqlite
+.sqlite
 /scripts/data/tb2.db
+/scripts/data/kilter12.sqlite
+/scripts/data/
