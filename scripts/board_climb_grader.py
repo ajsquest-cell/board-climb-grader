@@ -1,50 +1,38 @@
 import re
-import sqlite3
-import pandas as pd
 from pathlib import Path
 import random
 
-import numpy as np
 import pandas as pd
+import numpy as np
 import scipy as sp
-from sklearn.model_selection import train_test_split
-from sklearn.ensemble import RandomForestClassifier
-from sklearn.linear_model import LogisticRegression
-from sklearn.metrics import accuracy_score, confusion_matrix
 
 import access_database as adb
+import learning_model as lm
 
 # Alex King and Ben Hawkins
 # board-climb-grader.py
 
-PLACEMENTS_PATH = Path(__file__).resolve().parent / "data" / "tb2.db"
-
-## Board Constants
-# x_min = -24
-# x_max = 168
-# y_min = 0
-# y_max = 156
-# board_width = x_max - x_min
-# board_height = y_max - y_min
-
 # Hold ID
 HAND_HOLD_IDS = {1, 2, 3}
 FOOT_HOLD_IDS = {4}
-MIDDLE_HOLD_ID = 2
+MIDDLE_HOLD_ID = {2}
 
 HOLD_MAPPING = {
     1: 'start',
     2: 'middle',
     3: 'finish',
     4: 'foot'
-}
+    }
 
-# Load hold placements
+
+# Load hold placements dictionary
 placement_coords = adb.extract_holes()
+
 
 # defulted middle
 def get_hold_type(hold_id):
     return HOLD_MAPPING.get(hold_id, 'middle')
+
 
 # Example frame string: "p12r12p13r13p14r14p15r15"
 def parse_frame(frame):
@@ -54,10 +42,6 @@ def parse_frame(frame):
     else:
         return None
 
-# Helper for testing  
-def print_hold_data(hold_data):
-    for hold in hold_data:
-        print(f"Hold ID: {hold['hold_id']}, X: {hold['x']}, Y: {hold['y']}, Type: {hold['hold_type']}, Hand: {hold['is_hand_hold']}, Foot: {hold['is_foot_hold']}")
 
 # Extract features from a given frame and angle
 def extract_features_from_frame(angle, frame, is_nomatch, edge_left, edge_right, edge_bottom, edge_top):
@@ -111,8 +95,13 @@ def extract_features_from_frame(angle, frame, is_nomatch, edge_left, edge_right,
     #implemented features for testing:
 
     # Base features
-    features['angle'] = angle
-    features["angle_squared"] = float(angle) ** 2 if angle is not None else None
+    try:
+        angle_value = float(angle)
+    except (TypeError, ValueError):
+        angle_value = 0.0
+
+    features['angle'] = angle_value
+    features["angle_squared"] = angle_value ** 2
     features['num_holds'] = len(holds)
     features['num_hand_holds'] = len(hand_holds)
     features['num_foot_holds'] = len(foot_holds)
@@ -141,28 +130,37 @@ def extract_features_from_frame(angle, frame, is_nomatch, edge_left, edge_right,
     features['hold_per_unit_height'] = float(features['num_holds'] / max(features['range_y'], 1)) if features['range_y'] > 0 else 0
 
     # Density features
-    features['box_area'] = (
+    features['board_area'] = (
         float(features['range_x'] * features['range_y'])
         if features['range_x'] is not None and features['range_y'] is not None and features['range_x'] > 0 and features['range_y'] > 0 else 1
     )
-    features['hold_density'] = float(features['num_holds'] / features['box_area']) if features['box_area'] else 0
-    features['hand_hold_density'] = float(features['num_hand_holds'] / features['box_area']) if features['box_area'] else 0
+    features['hold_density'] = float(features['num_holds'] / features['board_area']) if features['board_area'] else 0
+    features['hand_hold_density'] = float(features['num_hand_holds'] / features['board_area']) if features['board_area'] else 0
+    features['foot_hold_density'] = float(features['num_foot_holds'] / features['board_area']) if features['board_area'] else 0
+    features['hand_to_foot_density_ratio'] = (
+        float(features['hand_hold_density'] / features['foot_hold_density'])
+        if features['foot_hold_density'] and np.isfinite(features['hand_hold_density'] / features['foot_hold_density'])
+        else 0.0
+    )
 
     # Hand reach features
     if features['num_hand_holds'] >= 2:
         hand_pairs = hand_holds[['x', 'y']].to_numpy()
         hand_hold_distances = sp.spatial.distance.pdist(hand_pairs)
+        
         hand_x = hand_holds['x'].to_numpy()
         hand_y = hand_holds['y'].to_numpy()
 
         features['mean_hand_reach'] = float(np.mean(hand_hold_distances))
         features['max_hand_reach'] = float(np.max(hand_hold_distances))
+        features['min_hand_reach'] = float(np.min(hand_hold_distances))
         features['std_hand_reach'] = float(np.std(hand_hold_distances))
         features['hand_spread_x'] = float(np.max(hand_x) - np.min(hand_x))
         features['hand_spread_y'] = float(np.max(hand_y) - np.min(hand_y))
     else:
         features['mean_hand_reach'] = 0.0
         features['max_hand_reach'] = 0.0
+        features['min_hand_reach'] = 0.0
         features['std_hand_reach'] = 0.0
         features['hand_spread_x'] = 0.0
         features['hand_spread_y'] = 0.0
@@ -191,74 +189,53 @@ def extract_features_from_frame(angle, frame, is_nomatch, edge_left, edge_right,
         features['std_hand_foot_reach'] = 0.0
 
     # Normalized features
+    board_width_norm = max(board_width, 1)
+    board_height_norm = max(board_height, 1)
+    board_area_norm = board_width_norm * board_height_norm
+    board_span_norm = max(board_width_norm, board_height_norm, 1)
+
+    def safe_divide(numerator, denominator):
+        with np.errstate(divide='ignore', invalid='ignore'):
+            value = np.divide(numerator, denominator)
+        return float(np.nan_to_num(value, nan=0.0, posinf=0.0, neginf=0.0))
+
+    features['norm_mean_y'] = safe_divide(features['mean_y'], board_height_norm)
+    features['norm_std_y'] = safe_divide(features['std_y'], board_height_norm)
+    features['norm_std_x'] = safe_divide(features['std_X'], board_width_norm)
+    features['norm_min_y'] = safe_divide(features['min_y'], board_height_norm)
+    features['norm_max_y'] = safe_divide(features['max_y'], board_height_norm)
+    features['norm_min_x'] = safe_divide(features['min_x'], board_width_norm)
+    features['norm_max_x'] = safe_divide(features['max_x'], board_width_norm)
+    features['norm_range_y'] = safe_divide(features['range_y'], board_height_norm)
+    features['norm_range_x'] = safe_divide(features['range_x'], board_width_norm)
     
+    features['norm_start_height'] = safe_divide(features['start_height'], board_height_norm) if features['start_height'] is not None else 0.0
+    features['norm_finish_height'] = safe_divide(features['finish_height'], board_height_norm) if features['finish_height'] is not None else 0.0
+    features['norm_height_gained'] = safe_divide(features['height_gained'], board_height_norm) if features['height_gained'] is not None else 0.0
+    
+    features['norm_board_area'] = safe_divide(features['board_area'], board_area_norm) if features['board_area'] is not None else 0.0
+    features['norm_hold_density'] = safe_divide(features['num_holds'], board_area_norm)
+    features['norm_hand_hold_density'] = safe_divide(features['num_hand_holds'], board_area_norm)
+    features['norm_foot_hold_density'] = safe_divide(features['num_foot_holds'], board_area_norm)
+
+    features['norm_mean_hand_reach'] = safe_divide(features['mean_hand_reach'], board_width_norm) if features['mean_hand_reach'] is not None else 0.0
+    features['norm_max_hand_reach'] = safe_divide(features['max_hand_reach'], board_width_norm) if features['max_hand_reach'] is not None else 0.0
+    features['norm_min_hand_reach'] = safe_divide(features['min_hand_reach'], board_width_norm) if features['min_hand_reach'] is not None else 0.0
+    features['norm_std_hand_reach'] = safe_divide(features['std_hand_reach'], board_width_norm) if features['std_hand_reach'] is not None else 0.0
+    features['norm_hand_spread_x'] = safe_divide(features['hand_spread_x'], board_width_norm) if features['hand_spread_x'] is not None else 0.0
+    features['norm_hand_spread_y'] = safe_divide(features['hand_spread_y'], board_height_norm) if features['hand_spread_y'] is not None else 0.0
+    
+    features['norm_mean_hand_foot_reach'] = safe_divide(features['mean_hand_foot_reach'], board_span_norm) if features['mean_hand_foot_reach'] is not None else 0.0
+    features['norm_max_hand_foot_reach'] = safe_divide(features['max_hand_foot_reach'], board_span_norm) if features['max_hand_foot_reach'] is not None else 0.0
+    features['norm_min_hand_foot_reach'] = safe_divide(features['min_hand_foot_reach'], board_span_norm) if features['min_hand_foot_reach'] is not None else 0.0
+    features['norm_std_hand_foot_reach'] = safe_divide(features['std_hand_foot_reach'], board_span_norm) if features['std_hand_foot_reach'] is not None else 0.0
 
     # Other features
-    # features['hand_to_foot_ratio'] = features['num_hand_holds'] / features['num_foot_holds'] if features['num_foot_holds'] else float('inf')
-    # features['angle_x_holds'] = features['angle'] * features['num_holds']
+    features['angle_x_holds'] = features['angle'] * features['num_holds']
+
 
     return features
 
-def evaluate_two_bucket_logistic(df, feature_columns, threshold=19):
-    binary_df = df[df["climb_grade"].notna()].copy()
-    binary_df["binary_label"] = (binary_df["climb_grade"] >= threshold).astype(int)
-
-    X = binary_df[feature_columns]
-    y = binary_df["binary_label"]
-
-    X_train, X_test, y_train, y_test = train_test_split(
-        X, y, test_size=0.2, random_state=42
-    )
-
-    model = LogisticRegression(max_iter=4000)
-    model.fit(X_train, y_train)
-
-    y_pred = model.predict(X_test)
-
-    accuracy = accuracy_score(y_test, y_pred)
-    conf_matrix = confusion_matrix(y_test, y_pred)
-
-    print("\n2-Bucket Logistic Regression Results:")
-    print(f'Overall Accuracy: {accuracy:.4f}')
-    print(f'Confusion Matrix:\n{conf_matrix}')
-
-
-def evaluate_bucketed_random_forest(df, feature_columns):
-    bucket_df = df[df["climb_grade"].notna()].copy()
-
-    def bucket_grade(grade):
-        if grade <= 17:
-            return 0
-        elif grade <= 23:
-            return 1
-        else:
-            return 2
-
-    bucket_df["bucket_label"] = bucket_df["climb_grade"].apply(bucket_grade)
-
-    X = bucket_df[feature_columns]
-    y = bucket_df["bucket_label"]
-
-    X_train, X_test, y_train, y_test = train_test_split(
-        X, y, test_size=0.2, random_state=42
-    )
-
-    model = RandomForestClassifier(
-        n_estimators=300,
-        max_depth=None,
-        random_state=42,
-        class_weight="balanced"
-    )
-    model.fit(X_train, y_train)
-
-    y_pred = model.predict(X_test)
-
-    accuracy = accuracy_score(y_test, y_pred)
-    conf_matrix = confusion_matrix(y_test, y_pred)
-
-    print("\n3-Bucket Random Forest Results:")
-    print(f'Overall Accuracy: {accuracy:.4f}')
-    print(f'Confusion Matrix:\n{conf_matrix}')
 
 # Testing
 def main():
@@ -296,7 +273,8 @@ def main():
             record['edge_left'], 
             record['edge_right'], 
             record['edge_bottom'], 
-            record['edge_top'])
+            record['edge_top'],
+            )
         
         if features is None:
             continue
@@ -311,10 +289,28 @@ def main():
     # Remove rows with missing features
     df = df[df["climb_grade"].notna()]
 
+    base_feature_columns = [
+        "angle", 
+        "is_nomatch", 
+        "num_holds",
+        "norm_height_gained",
+        "hold_per_unit_height", 
+        "norm_hold_density", 
+        "norm_mean_hand_reach",
+        "norm_max_hand_reach",
+        "norm_min_hand_reach",
+        "norm_std_hand_reach",
+        "norm_mean_hand_foot_reach",
+        "norm_min_hand_foot_reach",
+        "norm_std_hand_foot_reach",
+        "norm_mean_y",
+        ]
+
     feature_columns = [
         "angle", 
         "angle_squared", 
         "num_holds", 
+        "angle_x_holds",
         "height_gained", 
         "hold_density", 
         "mean_hand_reach", 
@@ -323,46 +319,111 @@ def main():
         "hold_per_unit_height", 
         "is_nomatch", 
         "mean_hand_foot_reach", 
-        "max_hand_foot_reach", 
         "min_hand_foot_reach", 
-        "std_hand_foot_reach"
+        "std_hand_foot_reach",
+        "hand_to_foot_density_ratio",
         ]
+    
+    normalized_feature_columns = [
+        "angle", 
+        "angle_squared", 
+        "num_holds", 
+        "angle_x_holds",
+        "is_nomatch", 
+        "norm_mean_y",
+        "norm_height_gained",
+        "norm_hold_density",
+        "norm_mean_hand_reach",
+        "norm_max_hand_reach",
+        "norm_min_hand_reach",
+        "norm_std_hand_reach",
+        "norm_hand_spread_x",
+        "norm_hand_spread_y",
+        "norm_mean_hand_foot_reach",
+        "norm_min_hand_foot_reach",
+        "norm_std_hand_foot_reach"
+    ]
+
+    all_feature_columns = [
+        "angle",
+        "angle_squared",
+        "num_holds",
+        "num_hand_holds",
+        "num_foot_holds",
+        "start_holds",
+        "finish_holds",
+        "middle_holds",
+        "is_nomatch",
+        "mean_y",
+        "std_y",
+        "std_X",
+        "min_y",
+        "max_y",
+        "min_x",
+        "max_x",
+        "range_y",
+        "range_x",
+        "start_height",
+        "finish_height",
+        "height_gained",
+        "hold_per_unit_height",
+        "board_area",
+        "hold_density",
+        "hand_hold_density",
+        "foot_hold_density",
+        "hand_to_foot_density_ratio",
+        "mean_hand_reach",
+        "max_hand_reach",
+        "min_hand_reach",
+        "std_hand_reach",
+        "hand_spread_x",
+        "hand_spread_y",
+        "mean_hand_foot_reach",
+        "max_hand_foot_reach",
+        "min_hand_foot_reach",
+        "std_hand_foot_reach",
+        "norm_mean_y",
+        "norm_std_y",
+        "norm_std_x",
+        "norm_min_y",
+        "norm_max_y",
+        "norm_min_x",
+        "norm_max_x",
+        "norm_range_y",
+        "norm_range_x",
+        "norm_start_height",
+        "norm_finish_height",
+        "norm_height_gained",
+        "norm_board_area",
+        "norm_hold_density",
+        "norm_hand_hold_density",
+        "norm_foot_hold_density",
+        "norm_mean_hand_reach",
+        "norm_max_hand_reach",
+        "norm_min_hand_reach",
+        "norm_std_hand_reach",
+        "norm_hand_spread_x",
+        "norm_hand_spread_y",
+        "norm_mean_hand_foot_reach",
+        "norm_max_hand_foot_reach",
+        "norm_min_hand_foot_reach",
+        "norm_std_hand_foot_reach",
+        "angle_x_holds",
+    ]
+
     # Fill NaN values in features with 0
     df[feature_columns] = df[feature_columns].fillna(0)
+    df[base_feature_columns] = df[base_feature_columns].fillna(0)
+    df[normalized_feature_columns] = df[normalized_feature_columns].fillna(0)
+    df[all_feature_columns] = df[all_feature_columns].fillna(0)
 
-    # Keep the existing classifier on the original 10-28 grade range.
-    classification_df = df[(df["climb_grade"] >= 10) & (df["climb_grade"] <= 28)].copy()
-    X_class = classification_df[feature_columns]
-    y_class = classification_df["climb_grade"]
-
-    X_class_train, X_class_test, y_class_train, y_class_test = train_test_split(
-        X_class, y_class, test_size=0.2, random_state=42
-    )
-
-    model = RandomForestClassifier(
-        n_estimators=300,
-        max_depth=None,
-        random_state=42,
-        class_weight="balanced"
-    )
-    model.fit(X_class_train, y_class_train)
-
-    y_class_pred = model.predict(X_class_test)
-    accuracy = accuracy_score(y_class_test, y_class_pred)
-
-    # Calculate within buckets
-    within_1 = np.mean(np.abs(y_class_test - y_class_pred) <= 1)
-    within_2 = np.mean(np.abs(y_class_test - y_class_pred) <= 2)
-
-    conf_matrix = confusion_matrix(y_class_test, y_class_pred)
-
-    print(f'Exact Accuracy: {accuracy:.4f}')
-    print(f'Within 1 Grade Accuracy: {within_1:.4f}')
-    print(f'Within 2 Grades Accuracy: {within_2:.4f}')
-    print(f'Confusion Matrix:\n{conf_matrix}')
-
-    evaluate_two_bucket_logistic(df, feature_columns)
-    evaluate_bucketed_random_forest(df, feature_columns)
+    # Run models
+    # lm.evaluate_all_grades_logistic(df, feature_columns)
+    lm.evaluate_two_bucket_logistic(df, feature_columns)
+    lm.evaluate_two_bucket_logistic(df, base_feature_columns)
+    lm.evaluate_two_bucket_logistic(df, normalized_feature_columns)
+    lm.evaluate_two_bucket_logistic(df, all_feature_columns)
+    # lm.evaluate_bucketed_random_forest(df, feature_columns)
 
 
 if __name__ == "__main__":
