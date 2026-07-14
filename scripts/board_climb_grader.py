@@ -242,12 +242,12 @@ def main():
     difficulty_grades = adb.extract_difficulty_grades()
 
     # number of climbs and offset
-    count = 5000
+    count = 20000
     offset = random.randint(0, adb.get_table_size("climbs") - count)
 
     # Fetch rows from the database
-    rows = adb.fetch_rows_from(count, offset)
-    # rows = adb.fetch_random_rows(count)
+    # rows = adb.fetch_rows_from(count, offset)
+    rows = adb.fetch_random_rows(count)
 
     climb_data = []
 
@@ -290,7 +290,8 @@ def main():
     df = df[df["climb_grade"].notna()]
 
     base_feature_columns = [
-        "angle", 
+        "angle",
+        "angle_squared",
         "is_nomatch", 
         "num_holds",
         "norm_height_gained",
@@ -298,11 +299,8 @@ def main():
         "norm_hold_density", 
         "norm_mean_hand_reach",
         "norm_max_hand_reach",
-        "norm_min_hand_reach",
-        "norm_std_hand_reach",
         "norm_mean_hand_foot_reach",
         "norm_min_hand_foot_reach",
-        "norm_std_hand_foot_reach",
         "norm_mean_y",
         ]
 
