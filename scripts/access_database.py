@@ -9,6 +9,7 @@ BETA_LINKS_TABLE = "beta_links" # Angle
 CLIMB_CACHE_FIELDS_TABLE = "climb_cache_fields" # Difficulty, quality, ascensionist count
 CLIMBS_TABLE = "climbs" # Frames and other climb data
 DIFFICULTY_GRADES_TABLE = "difficulty_grades" # Grading Scale
+CLIMB_STATS_TABLE = "climb_stats" # Climb stats
 
 # In-memory cache for table sizes
 TABLE_SIZE_CACHE = {}
@@ -152,7 +153,8 @@ def fetch_angle(climb_uuid):
     if not DB_PATH.exists():
         raise FileNotFoundError(f"Database file not found: {DB_PATH}")
     
-    SELECT_STATS_SQL = f"""SELECT angle FROM {BETA_LINKS_TABLE} WHERE climb_uuid = ?"""
+    SELECT_STATS_SQL = f"""SELECT angle FROM {CLIMB_STATS_TABLE} WHERE climb_uuid = ?"""
+    ##Switched to Climb Stats table to get angle, looking at the data its the only one with no nulls
 
     with sqlite3.connect(DB_PATH) as conn:
         cursor = conn.cursor()
