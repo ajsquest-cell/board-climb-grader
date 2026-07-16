@@ -242,7 +242,7 @@ def main():
     difficulty_grades = adb.extract_difficulty_grades()
 
     # number of climbs and offset
-    count = 20000
+    count = 100000
     offset = random.randint(0, adb.get_table_size("climbs") - count)
 
     # Fetch rows from the database
@@ -292,10 +292,10 @@ def main():
     base_feature_columns = [
         "angle",
         "angle_squared",
+        "angle_x_holds",
         "is_nomatch", 
         "num_holds",
-        "norm_height_gained",
-        "hold_per_unit_height", 
+        "norm_height_gained", 
         "norm_hold_density", 
         "norm_mean_hand_reach",
         "norm_max_hand_reach",
@@ -417,10 +417,10 @@ def main():
 
     # Run models
     # lm.evaluate_all_grades_logistic(df, feature_columns)
-    lm.evaluate_two_bucket_logistic(df, feature_columns)
-    lm.evaluate_two_bucket_logistic(df, base_feature_columns)
-    lm.evaluate_two_bucket_logistic(df, normalized_feature_columns)
-    lm.evaluate_two_bucket_logistic(df, all_feature_columns)
+    # lm.evaluate_two_bucket_SGDClassaifier(df, base_feature_columns)
+    lm.evaluate_two_bucket_logistic(df, base_feature_columns, 19)
+    lm.evaluate_two_bucket_histogram(df, base_feature_columns, 19)
+    # lm.evaluate_two_bucket_logistic(df, normalized_feature_columns)
     # lm.evaluate_bucketed_random_forest(df, feature_columns)
 
 

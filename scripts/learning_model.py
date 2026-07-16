@@ -4,10 +4,13 @@ import scipy as sp
 import matplotlib.pyplot as plt
 
 from sklearn.model_selection import train_test_split
-from sklearn.ensemble import RandomForestClassifier
-from sklearn.linear_model import LogisticRegression
-from sklearn.metrics import accuracy_score, confusion_matrix, precision_recall_fscore_support
+from sklearn.ensemble import RandomForestClassifier, HistGradientBoostingClassifier
+from sklearn.linear_model import LogisticRegression, SGDClassifier
+from sklearn.metrics import accuracy_score, confusion_matrix, precision_recall_fscore_support, classification_report
 from sklearn.preprocessing import StandardScaler
+from sklearn.inspection import permutation_importance
+
+
 
 def scale_features(X, feature_columns):
     scaler = StandardScaler()
@@ -15,13 +18,86 @@ def scale_features(X, feature_columns):
     return pd.DataFrame(scaled, columns=feature_columns, index=X.index)
 
 
-def evaluate_two_bucket_logistic(df, feature_columns, threshold=19):
+def evaluate_two_bucket_histogram(df, feature_columns, threashold=19):
+    bucket_df = df[df["climb_grade"].notna()].copy()
+
+    # Two buckets:
+    # 0 -> grade <= 19
+    # 1 -> grade > 19
+    bucket_df["bucket_label"] = (bucket_df["climb_grade"] > threashold).astype(int)
+
+    X = bucket_df[feature_columns]
+    y = bucket_df["bucket_label"]
+
+    X_train, X_test, y_train, y_test = train_test_split(
+        X,
+        y,
+        test_size=0.2,
+        random_state=42,
+        stratify=y
+    )
+
+    # HistGradientBoosting does NOT require feature scaling
+    model = HistGradientBoostingClassifier(
+        learning_rate=0.02,
+        max_iter=1000,
+        max_leaf_nodes=31,
+        min_samples_leaf=20,
+        l2_regularization=0.1,
+        random_state=42
+    )
+
+    model.fit(X_train, y_train)
+
+    y_pred = model.predict(X_test)
+
+    accuracy = accuracy_score(y_test, y_pred)
+    conf_matrix = confusion_matrix(y_test, y_pred)
+
+
+    # Compute permutation importance
+    result = permutation_importance(
+        model,
+        X_test,
+        y_test,
+        n_repeats=20,
+        random_state=42,
+        scoring="accuracy"
+    )
+
+    # Create a DataFrame
+    importance_df = pd.DataFrame({
+        "Feature": feature_columns,
+        "Importance": result.importances_mean,
+        "Std": result.importances_std
+    })
+
+    # Sort from most to least important
+    importance_df = importance_df.sort_values(
+        "Importance",
+        ascending=False
+    )
+
+    print("\nPermutation Feature Importance:")
+    for _, row in importance_df.iterrows():
+        print(f"{row['Feature']:30} {row['Importance']:.6f} ± {row['Std']:.6f}")
+
+    print("\n2-Bucket Histogram Gradient Boosting Results:")
+    print(f"Overall Accuracy: {accuracy:.4f}")
+    print(f"Confusion Matrix:\n{conf_matrix}")
+    print("\nClassification Report:")
+    print(classification_report(y_test, y_pred))
+
+
+def evaluate_two_bucket_SGDClassaifier(df, feature_columns, threshold=21):
+
     binary_df = df[df["climb_grade"].notna()].copy()
     binary_df["binary_label"] = (binary_df["climb_grade"] >= threshold).astype(int)
 
     X = binary_df[feature_columns]
     y = binary_df["binary_label"]
 
+    # Split and scale as before
     X_train, X_test, y_train, y_test = train_test_split(
         X, y, test_size=0.2, random_state=42
     )
@@ -29,10 +105,80 @@ def evaluate_two_bucket_logistic(df, feature_columns, threshold=19):
     X_train_scaled = scale_features(X_train, feature_columns)
     X_test_scaled = scale_features(X_test, feature_columns)
 
-    model = LogisticRegression(max_iter=max(1000, len(df)))
-    model.fit(X_train_scaled, y_train)
+    epochs = 100
+    accuracy_history = []
 
-    y_pred = model.predict(X_test_scaled)
+    model = SGDClassifier(
+        loss="log_loss",      # Logistic regression
+        max_iter=1,           # One epoch at a time
+        warm_start=True,      # Continue training each iteration
+        random_state=42
+    )
+
+    classes = np.unique(y_train)
+
+    for epoch in range(epochs):
+        if epoch == 0:
+            model.partial_fit(X_train_scaled, y_train, classes=classes)
+        else:
+            model.partial_fit(X_train_scaled, y_train)
+
+        # Training accuracy after this epoch
+        train_pred = model.predict(X_train_scaled)
+        accuracy_history.append(accuracy_score(y_train, train_pred))
+
+    plt.figure(figsize=(8, 5))
+    plt.plot(range(1, epochs + 1), accuracy_history, marker='o')
+    plt.title("Training Accuracy Over Epochs")
+    plt.xlabel("Epoch")
+    plt.ylabel("Training Accuracy")
+    plt.ylim(0, 1)
+    plt.grid(True)
+    plt.show()
+
+
+def evaluate_two_bucket_logistic(df, feature_columns, threshold=21):
+    binary_df = df[df["climb_grade"].notna()].copy()
+    binary_df["binary_label"] = (binary_df["climb_grade"] >= threshold).astype(int)
+
+    X = binary_df[feature_columns]
+    y = binary_df["binary_label"]
+
+    x_train, x_test, y_train, y_test = train_test_split(
+        X, y, test_size=0.2, random_state=42
+    )
+
+    model = LogisticRegression(max_iter=max(1000, len(df)))
+    model.fit(x_train, y_train)
+
+    y_pred = model.predict(x_test)
+
+    # Compute permutation importance
+    result = permutation_importance(
+        model,
+        x_test,
+        y_test,
+        n_repeats=20,
+        random_state=42,
+        scoring="accuracy"
+    )
+
+    # Create a DataFrame
+    importance_df = pd.DataFrame({
+        "Feature": feature_columns,
+        "Importance": result.importances_mean,
+        "Std": result.importances_std
+    })
+
+    # Sort from most to least important
+    importance_df = importance_df.sort_values(
+        "Importance",
+        ascending=False
+    )
+
+    print("\nPermutation Feature Importance:")
+    for _, row in importance_df.iterrows():
+        print(f"{row['Feature']:30} {row['Importance']:.6f} ± {row['Std']:.6f}")
 
     accuracy = accuracy_score(y_test, y_pred)
     conf_matrix = confusion_matrix(y_test, y_pred)
@@ -46,6 +192,13 @@ def evaluate_two_bucket_logistic(df, feature_columns, threshold=19):
     print("Class Metrics:")
     for label, p, r, f in zip([0, 1], precision, recall, f1):
         print(f'  Class {label}: Precision={p:.4f}, Recall={r:.4f}, F1={f:.4f}')
+    
+    below = (binary_df["climb_grade"] < threshold).sum()
+    above = (binary_df["climb_grade"] >= threshold).sum()
+
+    print(f"Threshold {threshold}")
+    print(f"Below {threshold}: {below}")
+    print(f"{threshold} and above: {above}")
 
     true_positive = conf_matrix[1, 1]
     true_negative = conf_matrix[0, 0]
@@ -56,32 +209,6 @@ def evaluate_two_bucket_logistic(df, feature_columns, threshold=19):
     plt.ylabel("Count")
     for bar, value in zip(ax, [true_negative, true_positive]):
         plt.text(bar.get_x() + bar.get_width() / 2, bar.get_height() + 5, str(value), ha='center', va='bottom')
-    plt.tight_layout()
-    plt.show()
-
-    iterations = list(range(1, 6))
-    accuracy_history = []
-    for i in iterations:
-        subset = binary_df.sample(frac=1, random_state=42 + i).copy()
-        subset_X = subset[feature_columns]
-        subset_y = subset["binary_label"]
-        subset_X_train, subset_X_test, subset_y_train, subset_y_test = train_test_split(
-            subset_X, subset_y, test_size=0.2, random_state=42 + i
-        )
-        subset_X_train_scaled = scale_features(subset_X_train, feature_columns)
-        subset_X_test_scaled = scale_features(subset_X_test, feature_columns)
-        subset_model = LogisticRegression(max_iter=max(1000, len(df)))
-        subset_model.fit(subset_X_train_scaled, subset_y_train)
-        subset_pred = subset_model.predict(subset_X_test_scaled)
-        accuracy_history.append(accuracy_score(subset_y_test, subset_pred))
-
-    plt.figure(figsize=(8, 5))
-    plt.plot(iterations, accuracy_history, marker='o', color='crimson')
-    plt.title("Accuracy Over Iterations")
-    plt.xlabel("Iteration")
-    plt.ylabel("Accuracy")
-    plt.ylim(0, 1)
-    plt.grid(True, alpha=0.3)
     plt.tight_layout()
     plt.show()
 
