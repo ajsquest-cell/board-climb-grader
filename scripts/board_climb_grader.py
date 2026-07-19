@@ -92,16 +92,9 @@ def extract_features_from_frame(angle, frame, is_nomatch, edge_left, edge_right,
 
     features = {}
 
-    #implemented features for testing:
-
     # Base features
-    try:
-        angle_value = float(angle)
-    except (TypeError, ValueError):
-        angle_value = 0.0
-
-    features['angle'] = angle_value
-    features["angle_squared"] = angle_value ** 2
+    features['angle'] = float(angle)
+    features["angle_squared"] = float(angle * angle)
     features['num_holds'] = len(holds)
     features['num_hand_holds'] = len(hand_holds)
     features['num_foot_holds'] = len(foot_holds)
@@ -239,22 +232,28 @@ def extract_features_from_frame(angle, frame, is_nomatch, edge_left, edge_right,
 
 # Testing
 def main():
+    # testing skipped features
+    skipped_none_features = 0
+    skipped_no_angle = 0
+    skipped_no_grade = 0
+
     difficulty_grades = adb.extract_difficulty_grades()
 
     # number of climbs and offset
-    count = 100000
+    count = 5000
     offset = random.randint(0, adb.get_table_size("climbs") - count)
 
     # Fetch rows from the database
     # rows = adb.fetch_rows_from(count, offset)
-    rows = adb.fetch_random_rows(count)
+    # rows = adb.fetch_random_rows(count)
+    # rows = adb.fetch_training_rows(count)
+    rows = adb.fetch_random_training_rows(count)
 
     climb_data = []
 
     for row in rows:
         record = {
             'climb_id': row['uuid'],
-            'angle': adb.fetch_angle(row['uuid']),
             'frames': row['frames'],
             'is_nomatch': row['is_nomatch'],
             'edge_left': row['edge_left'],
@@ -263,8 +262,26 @@ def main():
             'edge_top': row['edge_top'],
         }
 
+        angle = adb.fetch_angle(row['uuid'])
+
+        if angle is None:
+            skipped_no_angle += 1
+            # print(f"Skipping climb {record['climb_id']}: No angle")
+            continue
+        # print(f"{record['climb_id']} -> angle={angle}")
+
+        record['angle'] = angle
+
         stats = adb.fetch_climb_stats(record['climb_id'])
-        record['climb_grade'] = int(stats['display_difficulty']) if stats and stats.get('display_difficulty') is not None else None
+
+        grade = int(stats['display_difficulty']) if stats and stats.get('display_difficulty') is not None else None
+        
+        if grade is None:
+            skipped_no_grade += 1
+            #print(f"Skipping climb {record['climb_id']}: No grade")
+            continue
+
+        record['climb_grade'] = grade
         
         features = extract_features_from_frame(
             record['angle'], 
@@ -277,12 +294,21 @@ def main():
             )
         
         if features is None:
+            skipped_none_features += 1
+            #print(f"Skipping climb {record['climb_id']}: no features")
             continue
-
+        
         record.update(features)
         climb_data.append(record)
         # Testing
         # print(f"Climb ID: {record['climb_id']}, Grade: {record['climb_grade']}, Features: {features}")
+
+    print("\n===== Skip Summary =====")
+    print(f"Skipped (features=None): {skipped_none_features}")
+    print(f"Skipped (missing grade): {skipped_no_grade}")
+    print(f"Skipped (missing angle): {skipped_no_angle}")
+    print(f"Processed climbs: {len(climb_data)}")
+    print(f"Total rows: {len(rows)}")
 
     df = pd.DataFrame(climb_data)
 
@@ -292,15 +318,14 @@ def main():
     base_feature_columns = [
         "angle",
         "angle_squared",
-        "angle_x_holds",
         "is_nomatch", 
         "num_holds",
         "norm_height_gained", 
         "norm_hold_density", 
         "norm_mean_hand_reach",
         "norm_max_hand_reach",
+        "norm_hand_spread_y",
         "norm_mean_hand_foot_reach",
-        "norm_min_hand_foot_reach",
         "norm_mean_y",
         ]
 
@@ -418,7 +443,6 @@ def main():
     # Run models
     # lm.evaluate_all_grades_logistic(df, feature_columns)
     # lm.evaluate_two_bucket_SGDClassaifier(df, base_feature_columns)
-    lm.evaluate_two_bucket_logistic(df, base_feature_columns, 19)
     lm.evaluate_two_bucket_histogram(df, base_feature_columns, 19)
     # lm.evaluate_two_bucket_logistic(df, normalized_feature_columns)
     # lm.evaluate_bucketed_random_forest(df, feature_columns)
